@@ -6,6 +6,7 @@ import akka.cluster.ClusterEvent._
 import akka.pattern.pipe
 import akka.util.Timeout
 import com.example.domain.model.ConsistentHashRing
+import com.example.infrastructure.configuration.AppConfig
 
 import scala.concurrent.duration.DurationInt
 import scala.language.postfixOps
@@ -17,6 +18,7 @@ class MasterActor extends Actor with ActorLogging {
   implicit val timeout: Timeout = Timeout(3 seconds)
 
   private val cluster = Cluster(context.system)
+  private val hashRingSegments = AppConfig.getInt("task.scheduler.hash.ring.segments")
 
   override def preStart(): Unit = {
     cluster.subscribe(
@@ -33,7 +35,7 @@ class MasterActor extends Actor with ActorLogging {
 
   override def receive: Receive = handleClusterEvents(
     Map.empty[Address, ActorRef],
-    ConsistentHashRing[ActorRef](replicas = 60)
+    ConsistentHashRing[ActorRef](replicas = hashRingSegments)
   )
 
   private def handleClusterEvents(

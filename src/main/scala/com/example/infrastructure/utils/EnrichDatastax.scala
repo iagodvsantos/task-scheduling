@@ -1,12 +1,7 @@
-package com.example.utils
+package com.example.infrastructure.utils
 
 import com.datastax.oss.driver.api.core.CqlSession
-import com.datastax.oss.driver.api.core.cql.{
-  AsyncResultSet,
-  BoundStatement,
-  Row,
-  Statement
-}
+import com.datastax.oss.driver.api.core.cql.{AsyncResultSet, BoundStatement, Row, Statement}
 
 import scala.compat.java8.FutureConverters.CompletionStageOps
 import scala.concurrent.{ExecutionContext, Future}

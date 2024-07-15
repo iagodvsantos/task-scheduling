@@ -4,12 +4,19 @@ lazy val logbackVersion = "1.5.6"
 lazy val logstashVersion = "7.4"
 lazy val postgresVersion = "42.7.3"
 lazy val cassandraDriver = "4.18.1"
+lazy val akkaStreamKafkaVersion = "4.0.1"
+lazy val kafkaVersion = "3.6.2"
+lazy val dslJsonVersion = "2.0.2"
 
 lazy val compileDependencies = Seq(
   "com.typesafe.akka" %% "akka-actor" % akkaVersion,
   "com.typesafe.akka" %% "akka-stream" % akkaVersion,
   "com.typesafe.akka" %% "akka-slf4j" % akkaVersion,
   "com.typesafe.akka" %% "akka-cluster" % akkaVersion,
+  "com.typesafe.akka" %% "akka-stream" % akkaVersion,
+  "com.typesafe.akka" %% "akka-stream-kafka" % akkaStreamKafkaVersion,
+  "com.dslplatform" % "dsl-json" % dslJsonVersion,
+  "org.apache.kafka" % "kafka-clients" % kafkaVersion,
   "org.slf4j" % "jcl-over-slf4j" % jclOverSlf4jVersion,
   "net.logstash.logback" % "logstash-logback-encoder" % logstashVersion,
   "ch.qos.logback" % "logback-classic" % logbackVersion,
