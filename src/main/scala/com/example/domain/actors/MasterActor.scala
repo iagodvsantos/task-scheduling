@@ -49,7 +49,7 @@ class MasterActor extends Actor with ActorLogging {
         .resolveOne()
         .map(ref => (member.address, ref))
         .pipeTo(self)
-    case MemberRemoved(member, _) =>
+    case MemberRemoved(member, _) if member.hasRole("worker") =>
       val newHashRing = hashRing.removeNode(workers(member.address))
       assignSegments(newHashRing)
       context.become(handleClusterEvents(workers - member.address, newHashRing))

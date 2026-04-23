@@ -24,8 +24,6 @@ object Task {
 
   }
 
-  val TaskScheduleTable = "task_schedule"
-
   object Schema {
     val JobId = "job_id"
     val NextExecutionTime = "next_execution_time"
