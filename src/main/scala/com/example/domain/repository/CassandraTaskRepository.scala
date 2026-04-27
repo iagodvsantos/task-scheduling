@@ -15,8 +15,10 @@ import scala.util.Try
 class CassandraTaskRepository private (
     session: CqlSession,
     selectStmt: PreparedStatement,
-    updateStmt: PreparedStatement,
-    insertStmt: PreparedStatement
+    deleteStmt: PreparedStatement,
+    insertStmt: PreparedStatement,
+    claimStmt: PreparedStatement,
+    releaseStmt: PreparedStatement
 )(implicit ec: ExecutionContext)
     extends TaskRepository {
 
@@ -40,7 +42,6 @@ class CassandraTaskRepository private (
           .bind()
           .setLong(NextExecutionTime, epochMinute)
           .setSet(Segment, segments.asJava, classOf[String])
-          .setBoolean(Processed, false)
       )
       .flatMap(_.fetchAll)
   }
@@ -54,11 +55,20 @@ class CassandraTaskRepository private (
       .builder(DefaultBatchType.LOGGED)
       .addStatements(
         List[BatchableStatement[_]](
-          updateStmt
+          deleteStmt
             .bind()
             .setLong(NextExecutionTime, task.nextExecutionTime)
             .setLong(Segment, task.segment)
             .setLong(JobId, task.jobId),
+          insertStmt
+            .bind()
+            .setLong(NextExecutionTime, task.nextExecutionTime)
+            .setLong(Segment, task.segment)
+            .setBoolean(Processed, true)
+            .setLong(JobId, task.jobId)
+            .setInt(Priority, task.priority)
+            .setLong(Recurrence, task.recurrence)
+            .setLong(OriginalExecutionTime, task.originalExecutionTime),
           insertStmt
             .bind()
             .setLong(NextExecutionTime, nextOriginalExecutionTime / 60)
@@ -70,17 +80,45 @@ class CassandraTaskRepository private (
             .setLong(OriginalExecutionTime, nextOriginalExecutionTime)
         ).asJava
       )
-      .setIdempotence(true)
       .setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM)
       .build()
     session.timedExecuteAsync(batch).map(_ => ())
   }
+
+  override def claimTask(task: Task, workerId: String): Future[Option[Task]] =
+    session
+      .timedExecuteAsync(
+        claimStmt
+          .bind()
+          .setLong(CassandraTaskRepository.JobIdField, task.jobId)
+          .setLong(NextExecutionTime, task.nextExecutionTime)
+          .setLong(Segment, task.segment)
+          .setString(CassandraTaskRepository.WorkerIdField, workerId)
+      )
+      .map(rs => if (rs.one().getBoolean("[applied]")) Some(task) else None)
+
+  override def releaseTask(task: Task): Future[Unit] =
+    session
+      .timedExecuteAsync(
+        releaseStmt
+          .bind()
+          .setLong(CassandraTaskRepository.JobIdField, task.jobId)
+          .setLong(NextExecutionTime, task.nextExecutionTime)
+          .setLong(Segment, task.segment)
+      )
+      .map(_ => ())
 }
 
 object CassandraTaskRepository {
   import com.example.domain.model.Task.Schema._
 
-  private val table = "task_schedule"
+  private val table        = "task_schedule"
+  private val inFlightTable = "task_in_flight"
+
+  // Column names for task_in_flight (kept private to companion to avoid
+  // clashing with Task.Schema.JobId which is already in scope via wildcard import)
+  private val JobIdField    = "job_id"
+  private val WorkerIdField = "worker_id"
 
   private val selectCql =
     s"""
@@ -89,17 +127,16 @@ object CassandraTaskRepository {
        |WHERE
        |$NextExecutionTime = :$NextExecutionTime AND
        |$Segment IN :$Segment AND
-       |$Processed = :$Processed
+       |$Processed = false
        |""".stripMargin
 
-  private val updateCql =
+  private val deleteCql =
     s"""
-       |UPDATE $table
-       |SET $Processed = true
+       |DELETE FROM $table
        |WHERE
        |$NextExecutionTime = :$NextExecutionTime AND
        |$Segment = :$Segment AND
-       |$Processed = False AND
+       |$Processed = false AND
        |$JobId = :$JobId
        |""".stripMargin
 
@@ -110,10 +147,27 @@ object CassandraTaskRepository {
        |VALUES (:$NextExecutionTime, :$Segment, :$Processed, :$JobId, :$Priority, :$Recurrence, :$OriginalExecutionTime)
        |""".stripMargin
 
+  private val claimCql =
+    s"""
+       |INSERT INTO $inFlightTable ($JobIdField, $NextExecutionTime, $Segment, $WorkerIdField)
+       |VALUES (:$JobIdField, :$NextExecutionTime, :$Segment, :$WorkerIdField)
+       |IF NOT EXISTS
+       |""".stripMargin
+
+  private val releaseCql =
+    s"""
+       |DELETE FROM $inFlightTable
+       |WHERE $JobIdField = :$JobIdField
+       |AND $NextExecutionTime = :$NextExecutionTime
+       |AND $Segment = :$Segment
+       |""".stripMargin
+
   def create(session: CqlSession)(implicit ec: ExecutionContext): Future[CassandraTaskRepository] =
     for {
-      sel <- session.prepareAsync(selectCql).toScala
-      upd <- session.prepareAsync(updateCql).toScala
-      ins <- session.prepareAsync(insertCql).toScala
-    } yield new CassandraTaskRepository(session, sel, upd, ins)
+      sel     <- session.prepareAsync(selectCql).toScala
+      del     <- session.prepareAsync(deleteCql).toScala
+      ins     <- session.prepareAsync(insertCql).toScala
+      claim   <- session.prepareAsync(claimCql).toScala
+      release <- session.prepareAsync(releaseCql).toScala
+    } yield new CassandraTaskRepository(session, sel, del, ins, claim, release)
 }

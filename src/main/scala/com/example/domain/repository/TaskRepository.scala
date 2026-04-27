@@ -11,4 +11,6 @@ trait TaskRepository {
       nextSegment: Long,
       nextOriginalExecutionTime: Long
   ): Future[Unit]
+  def claimTask(task: Task, workerId: String): Future[Option[Task]]
+  def releaseTask(task: Task): Future[Unit]
 }

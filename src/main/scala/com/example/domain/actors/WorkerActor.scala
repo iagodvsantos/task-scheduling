@@ -31,6 +31,9 @@ class WorkerActor(
   implicit val ec: ExecutionContext.parasitic.type = parasitic
   implicit def scheduler: Scheduler = context.system.scheduler
 
+  private val workerId: String =
+    self.path.toStringWithAddress(context.system.provider.getDefaultAddress)
+
   private val routingTopic =
     AppConfig.getString("task.scheduler.kafka-topics.execution")
 
@@ -66,6 +69,8 @@ class WorkerActor(
       Source
         .future(repository.getTasksDueForExecution(segments))
         .flatMapConcat(Source(_))
+        .mapAsync(parallelism = 8)(repository.claimTask(_, workerId))
+        .collect { case Some(task) => task }
         .mapAsync(parallelism = 8) { task =>
           Future(
             ProducerMessage.single(
@@ -98,7 +103,9 @@ class WorkerActor(
       val nextSegment = hashRing
         .getNode(task.originalExecutionTime.toString)
         .getOrElse(0L)
-      repository.recordTaskSentAndScheduleNext(task, nextSegment, nextOriginalExecutionTime)
+      repository
+        .recordTaskSentAndScheduleNext(task, nextSegment, nextOriginalExecutionTime)
+        .foreach(_ => repository.releaseTask(task))
   }
 }
 
